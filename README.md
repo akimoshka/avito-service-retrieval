@@ -128,7 +128,7 @@ score(q, i) = cosine(TFIDF(q), TFIDF(i)) + α · I(location_q = location_i)
 | 0.10 | 0.5087 |
 | **0.20** | **0.5392** |
 
-Лучший среди проверенных вариантов з `α = 0.20`.
+Лучший среди проверенных вариантов - `α = 0.20`.
 
 По сравнению с чистым lexical baseline:
 
@@ -148,7 +148,7 @@ TF-IDF + location            0.5392
 1. Объединение `item_title_raw`, `item_infm_params_text` и `item_description_raw`
 2. Построение Word TF-IDF с unigram + bigram признаками
 3. Вычисление lexical similarity между `search_query` и benchmark items
-4. Выбор расширенного набора до 500 lexical candidates.
+4. Выбор расширенного набора до 500 lexical candidates
 5. Добавление `0.20` к score объявления при совпадении `search_location_id` и `item_location_id`
 6. Выбор итоговых Top-50 объявлений
 7. Для редких запросов с недостаточным количеством lexical candidates используется fallback: сначала объявления из той же локации, затем объявления из общего benchmark corpus
