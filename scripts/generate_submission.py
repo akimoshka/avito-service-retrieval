@@ -266,23 +266,27 @@ def create_submission(
     queries: pd.DataFrame,
     output_path: Path,
 ) -> pd.DataFrame:
-    # Преобразует predictions в submission-файл.
-    # Каждая строка соответствует паре: query_id, item_id.
+    # Создаёт answer.csv.
+
+    # Одна строка соответствует одному query_id.
+    # До 50 item_id записываются в одной строке
+    # через один пробел.
 
     rows = []
 
-    # Проходим по queries, чтобы сохранить
-    # исходный порядок query_id.
     for query_id in queries["query_id"]:
-        item_ids = predictions.get(query_id, [])
+        # приводим item_id к строкам.
+        item_ids = [
+            str(item_id)
+            for item_id in predictions.get(query_id, [])[:TOP_K]
+        ]
 
-        for item_id in item_ids[:TOP_K]:
-            rows.append(
-                {
-                    "query_id": query_id,
-                    "item_id": item_id,
-                }
-            )
+        rows.append(
+            {
+                "query_id": str(query_id),
+                "item_id": " ".join(item_ids),
+            }
+        )
 
     submission = pd.DataFrame(rows)
 
@@ -304,15 +308,49 @@ def validate_submission(
     queries: pd.DataFrame,
     items: pd.DataFrame,
 ) -> None:
-    # Выполняет базовые проверки готового submission.
-    expected_queries = set(queries["query_id"])
-    actual_queries = set(submission["query_id"])
+    # Проверяет формат финального answer.csv.
 
-    valid_items = set(items["item_id"])
+    expected_queries = set(
+        queries["query_id"].astype(str)
+    )
 
-    counts = submission.groupby(
-        "query_id"
-    )["item_id"].count()
+    actual_queries = set(
+        submission["query_id"].astype(str)
+    )
+
+    valid_items = set(
+        items["item_id"].astype(str)
+    )
+
+    invalid_items = 0
+    duplicate_items = 0
+    too_many = 0
+    empty_queries = 0
+
+    candidate_counts = []
+
+    for row in submission.itertuples(index=False):
+        item_ids = str(row.item_id).split()
+
+        candidate_counts.append(len(item_ids))
+
+        if len(item_ids) == 0:
+            empty_queries += 1
+
+        if len(item_ids) > TOP_K:
+            too_many += 1
+
+        # Повторы внутри одного ответа.
+        duplicate_items += (
+            len(item_ids) - len(set(item_ids))
+        )
+
+        # Проверяем, что каждый item_id существует
+        # в benchmark corpus.
+        invalid_items += sum(
+            item_id not in valid_items
+            for item_id in item_ids
+        )
 
     print("\nПроверка submission")
     print("-" * 40)
@@ -323,7 +361,12 @@ def validate_submission(
     )
 
     print(
-        "Количество queries в submission:",
+        "Количество строк submission:",
+        len(submission),
+    )
+
+    print(
+        "Уникальных query_id:",
         len(actual_queries),
     )
 
@@ -334,59 +377,51 @@ def validate_submission(
 
     print(
         "Минимум candidates/query:",
-        counts.min(),
+        min(candidate_counts),
     )
 
     print(
         "Максимум candidates/query:",
-        counts.max(),
+        max(candidate_counts),
     )
-
-    print(
-        "Количество строк:",
-        len(submission),
-    )
-
-    invalid_items = (
-        ~submission["item_id"].isin(valid_items)
-    ).sum()
 
     print(
         "Неизвестных item_id:",
         invalid_items,
     )
 
-    duplicates = submission.duplicated(
-        ["query_id", "item_id"]
-    ).sum()
-
     print(
-        "Дубликатов query-item:",
-        duplicates,
+        "Повторов item_id внутри query:",
+        duplicate_items,
     )
 
-    # Критические проверки.
+    assert len(submission) == len(queries), (
+        "Количество строк должно совпадать "
+        "с количеством benchmark queries."
+    )
+
     assert expected_queries == actual_queries, (
-        "Не все benchmark queries присутствуют "
-        "в submission."
+        "Не все benchmark query_id присутствуют."
     )
 
-    assert counts.max() <= TOP_K, (
+    assert len(actual_queries) == len(submission), (
+        "В submission есть повторяющиеся query_id."
+    )
+
+    assert too_many == 0, (
         "Для некоторых запросов больше 50 кандидатов."
     )
 
-    assert counts.min() > 0, (
+    assert empty_queries == 0, (
         "Для некоторых запросов нет кандидатов."
     )
 
-    assert invalid_items == 0, (
-        "Submission содержит item_id вне "
-        "benchmark_items."
+    assert duplicate_items == 0, (
+        "Внутри некоторых ответов повторяются item_id."
     )
 
-    assert duplicates == 0, (
-        "В submission есть повторяющиеся "
-        "query-item пары."
+    assert invalid_items == 0, (
+        "Есть item_id, отсутствующие в benchmark corpus."
     )
 
     print("\nВсе проверки пройдены ✓")

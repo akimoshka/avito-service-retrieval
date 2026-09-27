@@ -186,13 +186,13 @@ python scripts/generate_submission.py
 
 Скрипт:
 
-- загружает benchmark queries и items;
-- строит TF-IDF представление;
-- выполняет retrieval;
-- применяет location boost;
-- выбирает Top-50;
-- выполняет проверки результата;
-- сохраняет submission.
+- загружает benchmark queries и items
+- строит TF-IDF представление
+- выполняет retrieval
+- применяет location boost
+- выбирает Top-50
+- выполняет проверки результата
+- сохраняет submission
 
 Результат:
 
@@ -204,12 +204,13 @@ outputs/answer.csv
 
 ```csv
 query_id,item_id
-70DfDUpwjxB4lzFd,6042fecdd7753112
-70DfDUpwjxB4lzFd,f4e8903d7689e222
-...
+70DfDUpwjxB4lzFd,6042fecdd7753112 f4e8903d7689e222 603623b4bd9e8f6c ...
+JTrdTaZJvSiLPkXj,cbeccbecb1fb8d86 5e62c7a98f91a124 ...
 ```
 
-Для каждого `query_id` генерируется 50 различных `item_id`.
+Каждая строка соответствует одному `query_id`. Для каждого запроса генерируется до 50 различных `item_id`, записанных в одной строке через пробел.
+
+`query_id` и `item_id` сохраняются как строки без изменения регистра.
 
 ---
 
@@ -218,21 +219,21 @@ query_id,item_id
 Перед сохранением результата автоматически проверяется:
 
 - наличие всех 2 452 benchmark queries
+- ровно одна строка для каждого `query_id`
 - не более 50 кандидатов на запрос
 - отсутствие неизвестных `item_id`
-- отсутствие повторяющихся `(query_id, item_id)`
+- отсутствие повторяющихся `item_id` внутри ответа одного запроса
 - отсутствие запросов без кандидатов
 
 Финальный submission содержит:
 
 ```text
-queries:                2 452
-candidates per query:      50
-rows:                  122 600
-invalid item_id:             0
-duplicate pairs:             0
+queries:                  2 452
+rows:                     2 452
+candidates per query:        50
+invalid item_id:               0
+duplicate item_id:             0
 ```
-
 ---
 
 ## Возможные улучшения
