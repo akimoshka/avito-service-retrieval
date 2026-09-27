@@ -112,14 +112,13 @@ Retrieval выполняется батчами и использует sparse m
 
 
 ```text
-score(q, i) = TFIDF(q, i) + α · I(location_q = location_i)
+score(q, i) = cosine(TFIDF(q), TFIDF(i)) + α · I(location_q = location_i)
 ```
 
 где:
-
-- `TFIDF(q, i)` - cosine similarity запроса и объявления
-- `I(...)` - индикатор совпадения локации
-- `α` - коэффициент location boost.
+- `cosine(TFIDF(q), TFIDF(i))` - cosine similarity между TF-IDF-векторами запроса и объявления
+- `I(location_q = location_i)` - индикатор совпадения локации
+- `α` - коэффициент location boost
 
 Проверенные значения:
 
@@ -203,7 +202,7 @@ outputs/answer.csv
 Формат:
 
 ```csv
-query_id,item_id
+query_id,answer
 70DfDUpwjxB4lzFd,6042fecdd7753112 f4e8903d7689e222 603623b4bd9e8f6c ...
 JTrdTaZJvSiLPkXj,cbeccbecb1fb8d86 5e62c7a98f91a124 ...
 ```
@@ -218,9 +217,12 @@ JTrdTaZJvSiLPkXj,cbeccbecb1fb8d86 5e62c7a98f91a124 ...
 
 Перед сохранением результата автоматически проверяется:
 
+- наличие ровно двух колонок: `query_id` и `answer`
 - наличие всех 2 452 benchmark queries
 - ровно одна строка для каждого `query_id`
-- не более 50 кандидатов на запрос
+- корректная длина `query_id` — 16 символов
+- не более 50 `item_id` на запрос
+- корректный формат `item_id` — 16 символов `0-9a-f`
 - отсутствие неизвестных `item_id`
 - отсутствие повторяющихся `item_id` внутри ответа одного запроса
 - отсутствие запросов без кандидатов
@@ -228,11 +230,15 @@ JTrdTaZJvSiLPkXj,cbeccbecb1fb8d86 5e62c7a98f91a124 ...
 Финальный submission содержит:
 
 ```text
-queries:                  2 452
-rows:                     2 452
-candidates per query:        50
-invalid item_id:               0
-duplicate item_id:             0
+benchmark queries:             2 452
+submission rows:               2 452
+unique query_id:               2 452
+missing queries:                   0
+candidates per query:             50
+unknown item_id:                   0
+duplicate item_id:                 0
+invalid item_id format:            0
+invalid query_id length:           0
 ```
 ---
 

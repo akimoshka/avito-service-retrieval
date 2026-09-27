@@ -284,7 +284,7 @@ def create_submission(
         rows.append(
             {
                 "query_id": str(query_id),
-                "item_id": " ".join(item_ids),
+                "answer": " ".join(item_ids),
             }
         )
 
@@ -326,13 +326,19 @@ def validate_submission(
     duplicate_items = 0
     too_many = 0
     empty_queries = 0
+    invalid_item_format = 0
+    invalid_query_format = 0
 
     candidate_counts = []
 
     for row in submission.itertuples(index=False):
-        item_ids = str(row.item_id).split()
+        query_id = str(row.query_id)
+        item_ids = str(row.answer).split()
 
         candidate_counts.append(len(item_ids))
+
+        if len(query_id) != 16:
+            invalid_query_format += 1
 
         if len(item_ids) == 0:
             empty_queries += 1
@@ -343,6 +349,17 @@ def validate_submission(
         # Повторы внутри одного ответа.
         duplicate_items += (
             len(item_ids) - len(set(item_ids))
+        )
+
+        # Проверяем формат item_id:
+        # ровно 16 символов 0-9a-f.
+        invalid_item_format += sum(
+            len(item_id) != 16
+            or any(
+                char not in "0123456789abcdef"
+                for char in item_id
+            )
+            for item_id in item_ids
         )
 
         # Проверяем, что каждый item_id существует
@@ -395,6 +412,22 @@ def validate_submission(
         duplicate_items,
     )
 
+    print(
+        "Некорректных item_id по формату:",
+        invalid_item_format,
+    )
+
+    print(
+        "Некорректных query_id по длине:",
+        invalid_query_format,
+    )
+
+    # Критические проверки.
+    assert list(submission.columns) == ["query_id", "answer"], (
+        "Submission должен содержать ровно две колонки: "
+        "query_id и answer."
+    )
+
     assert len(submission) == len(queries), (
         "Количество строк должно совпадать "
         "с количеством benchmark queries."
@@ -422,6 +455,14 @@ def validate_submission(
 
     assert invalid_items == 0, (
         "Есть item_id, отсутствующие в benchmark corpus."
+    )
+
+    assert invalid_item_format == 0, (
+        "Некоторые item_id имеют неправильный формат."
+    )
+
+    assert invalid_query_format == 0, (
+        "Некоторые query_id имеют длину не 16 символов."
     )
 
     print("\nВсе проверки пройдены ✓")
