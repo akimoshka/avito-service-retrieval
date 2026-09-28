@@ -9,7 +9,7 @@ from tqdm import tqdm
 # Конфигурация
 
 TOP_K = 50
-CANDIDATE_K = 500
+CANDIDATE_K = 20000
 BATCH_SIZE = 128
 LOCATION_BOOST = 0.20
 HISTORICAL_K = 15
@@ -41,8 +41,6 @@ def build_item_text(items: pd.DataFrame) -> pd.Series:
 
 
 def build_query_text(queries: pd.DataFrame) -> pd.Series:
-    # Формирует текстовое представление поискового запроса.
-
     return (
         queries["search_query"]
         .fillna("")
