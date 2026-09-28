@@ -1,22 +1,25 @@
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 from scipy import sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm import tqdm
 
+
 # Конфигурация
+
 TOP_K = 50
 CANDIDATE_K = 500
 BATCH_SIZE = 128
 LOCATION_BOOST = 0.20
-
+HISTORICAL_K = 15
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data" / "raw"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
+
+TRAIN_PATH = DATA_DIR / "train.parquet"
 QUERIES_PATH = DATA_DIR / "benchmark_queries.parquet"
 ITEMS_PATH = DATA_DIR / "benchmark_items.parquet"
 OUTPUT_PATH = OUTPUT_DIR / "answer.csv"
@@ -59,12 +62,11 @@ def retrieve_candidates(
     # Генерирует Top-K кандидатов для каждого benchmark-запроса.
 
     # Алгоритм:
-    # 1. Строит Word TF-IDF по title + params + description объявления.
-    # 2. Считает cosine similarity между запросом и объявлениями.
-    #    При L2-нормализованном TF-IDF это обычное скалярное произведение.
-    # 3. Для каждого запроса оставляет расширенный набор lexical candidates.
-    # 4. Добавляет bonus объявлениям из той же локации.
-    # 5. Возвращает Top-K item_id.
+    # 1. Строит Word TF-IDF по title + params + description объявления
+    # 2. Считает cosine similarity между запросом и объявлениями (При L2-нормализованном TF-IDF это обычное скалярное произведение)
+    # 3. Для каждого запроса оставляет расширенный набор lexical candidates
+    # 4. Добавляет bonus объявлениям из той же локации
+    # 5. Возвращает Top-K item_id
 
     item_texts = build_item_text(items)
     query_texts = build_query_text(queries)
@@ -196,6 +198,136 @@ def retrieve_candidates(
     return predictions
 
 
+def add_historical_candidates(
+    predictions: dict,
+    queries: pd.DataFrame,
+    train: pd.DataFrame,
+    items: pd.DataFrame,
+    historical_k: int = HISTORICAL_K,
+) -> dict:
+    # Добавляет historical candidates для benchmark-запросов,
+    # которые встречались в train.
+
+    # Сначала используются объявления из той же локации,
+    # затем остальные объявления для того же search_query.
+
+    # Используются только item_id, которые присутствуют
+    # в benchmark corpus.
+
+    valid_items = set(
+        items["item_id"].astype(str)
+    )
+
+    # Оставляем только train interactions,
+    # объявления которых существуют в benchmark corpus.
+    historical = train[
+        train["item_id"].astype(str).isin(valid_items)
+    ][
+        [
+            "search_query",
+            "search_location_id",
+            "item_id",
+        ]
+    ].copy()
+
+    historical["search_query"] = (
+        historical["search_query"]
+        .fillna("")
+        .astype(str)
+        .str.lower()
+    )
+
+    historical["item_id"] = (
+        historical["item_id"]
+        .astype(str)
+    )
+
+    # Убираем повторяющиеся взаимодействия.
+    historical = historical.drop_duplicates(
+        subset=[
+            "search_query",
+            "search_location_id",
+            "item_id",
+        ]
+    )
+
+    # Индекс по search_query для быстрого доступа.
+    historical_by_query = {
+        query: group
+        for query, group in historical.groupby(
+            "search_query",
+            sort=False,
+        )
+    }
+
+    matched_queries = 0
+    added_candidates = 0
+
+    for row in queries.itertuples(index=False):
+        query_id = row.query_id
+
+        query_text = (
+            str(row.search_query).lower()
+            if pd.notna(row.search_query)
+            else ""
+        )
+
+        query_location = row.search_location_id
+
+        group = historical_by_query.get(query_text)
+
+        if group is None:
+            continue
+
+        matched_queries += 1
+
+        # Сначала historical candidates
+        # из той же локации.
+        same_location = group[
+            group["search_location_id"] == query_location
+        ]["item_id"].tolist()
+
+        # Затем остальные historical candidates
+        # для того же текста запроса.
+        other_locations = group[
+            group["search_location_id"] != query_location
+        ]["item_id"].tolist()
+
+        historical_items = list(
+            dict.fromkeys(
+                same_location + other_locations
+            )
+        )[:historical_k]
+
+        current = predictions.get(query_id, [])
+
+        # Historical candidates ставим первыми,
+        # после них сохраняем текущие lexical candidates.
+        combined = list(
+            dict.fromkeys(
+                historical_items + current
+            )
+        )
+
+        predictions[query_id] = combined[:TOP_K]
+
+        added_candidates += len(
+            set(historical_items) - set(current)
+        )
+
+    print(
+        "Benchmark queries с historical candidates:",
+        matched_queries,
+    )
+
+    print(
+        "Добавлено новых historical candidates:",
+        added_candidates,
+    )
+
+    return predictions
+
+
 def fill_missing_candidates(
     predictions: dict,
     queries: pd.DataFrame,
@@ -204,10 +336,12 @@ def fill_missing_candidates(
 ) -> dict:
     # Гарантирует до Top-K кандидатов для каждого запроса.
 
-    # Если lexical retrieval вернул меньше 50 объявлений,
-    # сначала добавляются объявления из той же локации, затем любые объявления из benchmark corpus.
+    # Если retrieval вернул меньше 50 объявлений,
+    # сначала добавляются объявления из той же локации,
+    # затем любые объявления из benchmark corpus.
 
-    # Fallback особенно важен для запросов без известных TF-IDF токенов.
+    # Fallback особенно важен для запросов
+    # без известных TF-IDF токенов.
 
     all_item_ids = items["item_id"].to_numpy()
 
@@ -245,8 +379,7 @@ def fill_missing_candidates(
                 current.append(item_id)
                 used.add(item_id)
 
-        # Если всё ещё меньше Top-K —
-        # заполняем любыми объявлениями corpus.
+        # Если всё ещё меньше Top-K - заполняем любыми объявлениями corpus.
         if len(current) < top_k:
             for item_id in all_item_ids:
                 if len(current) >= top_k:
@@ -469,7 +602,7 @@ def validate_submission(
 
 
 def main():
-    print("Загрузка benchmark данных...")
+    print("Загрузка данных...")
 
     queries = pd.read_parquet(
         QUERIES_PATH
@@ -479,14 +612,31 @@ def main():
         ITEMS_PATH
     )
 
+    train = pd.read_parquet(
+        TRAIN_PATH
+    )
+
     print(f"Queries: {queries.shape}")
     print(f"Items:   {items.shape}")
+    print(f"Train:   {train.shape}")
 
+    # Базовый lexical retrieval.
     predictions = retrieve_candidates(
         queries=queries,
         items=items,
     )
 
+    # Добавляем historical retrieval.
+    predictions = add_historical_candidates(
+        predictions=predictions,
+        queries=queries,
+        train=train,
+        items=items,
+        historical_k=HISTORICAL_K,
+    )
+
+    # Заполняем редкие случаи,
+    # если кандидатов всё ещё меньше Top-K.
     predictions = fill_missing_candidates(
         predictions=predictions,
         queries=queries,
